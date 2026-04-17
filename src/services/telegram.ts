@@ -9,9 +9,9 @@ export class TelegramService {
     this.chatId = chatId;
   }
 
-  async sendNotification(containerNo: string, status: string) {
-    const message = `📦 *Container Update*\n\nNumber: \`${containerNo}\`\nStatus: *${status}*`;
-    
+  async sendNotification(containerNo: string, markingCode: string, details: string, subject: string) {
+    const message = `📦 *New Email Received*\n\n*Title:* ${subject}\n*Number:* \`${containerNo}\`\n*Marking Code:* *${markingCode}*\n\n${details}`;
+
     try {
       await this.bot.telegram.sendMessage(this.chatId, message, {
         parse_mode: 'Markdown',

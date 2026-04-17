@@ -43,8 +43,8 @@ async function main() {
             console.log(`[Parser] Found containers: ${containerNumbers.join(", ")}`);
             
             for (const no of containerNumbers) {
-              const { found, status } = await dbService.checkContainerStatus(no);
-              await telegramService.sendNotification(no, status);
+              const { found, markingCode, details } = await dbService.checkContainerStatus(no);
+              await telegramService.sendNotification(no, markingCode, details, subject);
             }
           }
         }
@@ -55,12 +55,31 @@ async function main() {
     };
 
     // 3. Start Polling
-    await runPipeline(); // Run once immediately
-    setInterval(runPipeline, CONFIG.POLL_INTERVAL);
+    const startPolling = async () => {
+      const spinner = ['|', '/', '-', '\\'];
+      let i = 0;
+
+      while (true) {
+        await runPipeline();
+        
+        const nextCheck = Date.now() + CONFIG.POLL_INTERVAL;
+        console.log(`[${new Date().toISOString()}] Next check in ${CONFIG.POLL_INTERVAL / 1000}s...`);
+
+        while (Date.now() < nextCheck) {
+          process.stdout.write(`\r ${spinner[i]} Monitoring for new emails... (next check in ${Math.ceil((nextCheck - Date.now()) / 1000)}s) `);
+          i = (i + 1) % spinner.length;
+          await new Promise(resolve => setTimeout(resolve, 250));
+        }
+        process.stdout.write('\r\n');
+      }
+    };
+
+    await startPolling();
 
   } catch (criticalError: any) {
-    console.error("❌ Critical Service Error:", criticalError.message);
-    process.exit(1);
+    console.error("❌ Critical Initialization Error:", criticalError.message);
+    console.log("Retrying initialization in 30 seconds...");
+    setTimeout(main, 30000);
   }
 }
 
