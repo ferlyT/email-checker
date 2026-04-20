@@ -27,13 +27,23 @@ export class EmailService {
       logger: false,
       tls: {
         rejectUnauthorized: false
-      }
+      },
+      // Increase timeout for reliability
+      connectionTimeout: 30000,
+      greetingTimeout: 30000,
+      socketTimeout: 30000,
+    });
+
+    // Listen for client errors
+    client.on('error', err => {
+      logger.error({ err }, "[ImapFlow Client Error] %s", err.message);
     });
 
     try {
       await client.connect();
+      logger.debug("[EmailService] Connected to IMAP server");
+
       const lock = await client.getMailboxLock('INBOX');
-      
       const subjects: string[] = [];
 
       try {
@@ -45,7 +55,7 @@ export class EmailService {
           since: today
         });
         
-        logger.debug("[EmailService] Found %d unread UIDs from today: %o", uids.length, uids);
+        logger.debug("[EmailService] Found %d unread UIDs from today", uids.length);
         
         if (uids.length === 0) return [];
 
@@ -68,7 +78,7 @@ export class EmailService {
       await client.logout();
       return subjects;
     } catch (error: any) {
-      logger.error("[EmailService Error] %s", error.message);
+      logger.error({ err: error }, "[EmailService Error] %s", error.message);
       throw error;
     }
   }

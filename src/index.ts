@@ -72,8 +72,8 @@ async function main() {
           }
         }
       } catch (error: any) {
-        logger.error("[Pipeline Error] %s", error.message);
-        await telegramService.sendError(error.message);
+        logger.error({ err: error }, "[Pipeline Error] %s", error.message);
+        await telegramService.sendError(`[Pipeline Error] ${error.message}`);
       }
     };
 
