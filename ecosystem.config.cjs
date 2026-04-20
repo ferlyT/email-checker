@@ -2,13 +2,9 @@ module.exports = {
   apps: [
     {
       name: "email-checker",
-      script: "src/index.ts",
-      interpreter: "bun",
+      script: "launcher.cjs",
       env: {
         NODE_ENV: "production",
-      },
-      env_development: {
-        NODE_ENV: "development",
       },
       autorestart: true,
       watch: false,
