@@ -1,27 +1,28 @@
 import sql from "mssql";
+import { logger } from "../utils/logger";
 
 export class DatabaseService {
   constructor(private pool: sql.ConnectionPool) { }
 
   async checkContainerStatus(number: string) {
     try {
-      console.log(`[Database] Checking container: '${number}'`);
+      logger.debug("[Database] Checking container: '%s'", number);
       const result = await this.pool.request()
         .input("number", sql.VarChar(15), number)
         .query("SELECT fdMarkingCode FROM tbMarking WHERE fdContNo LIKE '%' + @number + '%'");
 
-      console.log(`[Database] Found ${result.recordset.length} rows for '${number}'`);
+      logger.debug("[Database] Found %d rows for '%s'", result.recordset.length, number);
 
       if (result.recordset.length > 0) {
         const markingCode = result.recordset[0].fdMarkingCode;
 
         if (!markingCode || String(markingCode).trim() === "") {
-          console.log(`[Database] fdMarkingCode is empty for '${number}'`);
-          return { found: true, markingCode: "-", customers: "-" };
+          logger.warn("[Database] fdMarkingCode is empty for '%s'", number);
+          return { found: true, markingCode: "-", details: "-" };
         }
 
         const cleanMarkingCode = String(markingCode).trim();
-        console.log(`[Database] Found fdMarkingCode: '${cleanMarkingCode}'. Querying tbEntrylist...`);
+        logger.debug("[Database] Found fdMarkingCode: '%s'. Querying tbEntrylist...", cleanMarkingCode);
 
         const entryResult = await this.pool.request()
           .input("markingCode", sql.VarChar(50), cleanMarkingCode)
@@ -47,7 +48,7 @@ export class DatabaseService {
 
       return { found: false, markingCode: "-", details: "NOT FOUND" };
     } catch (error: any) {
-      console.error(`[Database Error] Details for ${number}:`, error.message);
+      logger.error("[Database Error] Details for %s: %s", number, error.message);
       return { found: false, markingCode: "-", details: "DB ERROR" };
     }
   }

@@ -1,4 +1,5 @@
 import { ImapFlow } from 'imapflow';
+import { logger } from '../utils/logger';
 
 export interface EmailConfig {
   host: string;
@@ -23,47 +24,52 @@ export class EmailService {
       port: this.config.port,
       secure: this.config.secure,
       auth: this.config.auth,
-      logger: false
+      logger: false,
+      tls: {
+        rejectUnauthorized: false
+      }
     });
 
-    await client.connect();
-    const lock = await client.getMailboxLock('INBOX');
-    
-    const subjects: string[] = [];
-
     try {
-      // 1. Search for unseen messages from today
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      await client.connect();
+      const lock = await client.getMailboxLock('INBOX');
       
-      const uids = await client.search({ 
-        seen: false,
-        since: today
-      });
-      
-      console.log(`[EmailService] Found ${uids.length} unread UIDs from today:`, uids);
-      
-      if (uids.length === 0) return [];
+      const subjects: string[] = [];
 
-      // 2. Fetch envelopes for these UIDs (all at once)
-      for await (let message of client.fetch(uids, { envelope: true })) {
-        if (message.envelope && message.envelope.subject) {
-          const subject = message.envelope.subject;
-          const from = message.envelope.from?.[0];
-          const sender = from ? `${from.name || ""} <${from.address}>` : "Unknown Sender";
-          
-          console.log(`[EmailService] Reading email: "${subject}" from ${sender}`);
-          subjects.push(subject);
+      try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const uids = await client.search({ 
+          seen: false,
+          since: today
+        });
+        
+        logger.debug("[EmailService] Found %d unread UIDs from today: %o", uids.length, uids);
+        
+        if (uids.length === 0) return [];
+
+        for await (let message of client.fetch(uids, { envelope: true })) {
+          if (message.envelope && message.envelope.subject) {
+            const subject = message.envelope.subject;
+            const from = message.envelope.from?.[0];
+            const sender = from ? `${from.name || ""} <${from.address}>` : "Unknown Sender";
+            
+            logger.info("[EmailService] Reading email: \"%s\" from %s", subject, sender);
+            subjects.push(subject);
+          }
         }
+
+        await client.messageFlagsAdd(uids, ['\\Seen']);
+      } finally {
+        lock.release();
       }
 
-      // 3. Mark all fetched messages as seen (done outside the loop to prevent deadlock)
-      await client.messageFlagsAdd(uids, ['\\Seen']);
-    } finally {
-      lock.release();
+      await client.logout();
+      return subjects;
+    } catch (error: any) {
+      logger.error("[EmailService Error] %s", error.message);
+      throw error;
     }
-
-    await client.logout();
-    return subjects;
   }
 }

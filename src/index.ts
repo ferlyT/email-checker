@@ -4,13 +4,36 @@ import { ParserService } from "./services/parser";
 import { DatabaseService } from "./services/database";
 import { TelegramService } from "./services/telegram";
 import { createDbConnection } from "./db";
+import { logger } from "./utils/logger";
 
 async function main() {
-  console.log("🚀 Starting Email Checker Service...");
+  logger.info("🚀 Starting Email Checker Service in %s mode...", CONFIG.NODE_ENV);
+
+  let db: any;
+  let isRunning = true;
+
+  // Graceful Shutdown Handler
+  const shutdown = async (signal: string) => {
+    if (!isRunning) return;
+    isRunning = false;
+    logger.info("🛑 Received %s. Shutting down gracefully...", signal);
+    
+    try {
+      if (db) await db.close();
+      logger.info("📦 Database connection closed.");
+    } catch (err: any) {
+      logger.error("❌ Error during shutdown: %s", err.message);
+    }
+    
+    process.exit(0);
+  };
+
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
 
   try {
     // 1. Initialize Services
-    const db = await createDbConnection(CONFIG.DATABASE_URL);
+    db = await createDbConnection(CONFIG.DATABASE_URL);
     const dbService = new DatabaseService(db);
     
     const emailService = new EmailService({
@@ -30,17 +53,17 @@ async function main() {
 
     // 2. Define the Pipeline
     const runPipeline = async () => {
-      console.log(`[${new Date().toISOString()}] Checking for new emails...`);
+      logger.info("Checking for new emails...");
       
       try {
         const subjects = await emailService.getNewEmailSubjects();
-        console.log(`[Email] Found ${subjects.length} new messages.`);
+        logger.info("Found %d new messages.", subjects.length);
 
         for (const subject of subjects) {
           const containerNumbers = ParserService.parseContainerNumbers(subject);
           
           if (containerNumbers.length > 0) {
-            console.log(`[Parser] Found containers: ${containerNumbers.join(", ")}`);
+            logger.info("[Parser] Found containers: %s", containerNumbers.join(", "));
             
             for (const no of containerNumbers) {
               const { found, markingCode, details } = await dbService.checkContainerStatus(no);
@@ -49,37 +72,32 @@ async function main() {
           }
         }
       } catch (error: any) {
-        console.error("[Pipeline Error]", error.message);
+        logger.error("[Pipeline Error] %s", error.message);
         await telegramService.sendError(error.message);
       }
     };
 
     // 3. Start Polling
-    const startPolling = async () => {
-      const spinner = ['|', '/', '-', '\\'];
-      let i = 0;
-
-      while (true) {
-        await runPipeline();
-        
-        const nextCheck = Date.now() + CONFIG.POLL_INTERVAL;
-        console.log(`[${new Date().toISOString()}] Next check in ${CONFIG.POLL_INTERVAL / 1000}s...`);
-
-        while (Date.now() < nextCheck) {
-          process.stdout.write(`\r ${spinner[i]} Monitoring for new emails... (next check in ${Math.ceil((nextCheck - Date.now()) / 1000)}s) `);
-          i = (i + 1) % spinner.length;
-          await new Promise(resolve => setTimeout(resolve, 250));
-        }
-        process.stdout.write('\r\n');
+    while (isRunning) {
+      await runPipeline();
+      
+      logger.info("Next check in %ds...", CONFIG.POLL_INTERVAL / 1000);
+      
+      // Wait for interval but allow interruption
+      const waitTime = CONFIG.POLL_INTERVAL;
+      const startTime = Date.now();
+      
+      while (Date.now() - startTime < waitTime && isRunning) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
-    };
-
-    await startPolling();
+    }
 
   } catch (criticalError: any) {
-    console.error("❌ Critical Initialization Error:", criticalError.message);
-    console.log("Retrying initialization in 30 seconds...");
-    setTimeout(main, 30000);
+    logger.error("❌ Critical Initialization Error: %s", criticalError.message);
+    if (isRunning) {
+      logger.info("Retrying initialization in 30 seconds...");
+      setTimeout(main, 30000);
+    }
   }
 }
 
